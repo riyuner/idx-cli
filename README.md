@@ -24,24 +24,6 @@ A command-line interface (CLI) application for real-time monitoring of Indonesia
 
 ## Installation
 
-### Standard Build
-
-1. Clone the repository:
-```bash
-git clone [repository-url]
-cd idx-cli
-```
-
-2. Build the application:
-```bash
-mvn clean package
-```
-
-3. Run the application:
-```bash
-java -jar target/idx-cli-1.0.0-SNAPSHOT.jar -s SYMBOL
-```
-
 ### Native Image Build
 
 Building a native executable creates a platform-specific binary that starts up faster and uses less memory.
@@ -57,7 +39,7 @@ mvn package -Pnative
 
 2. Run the native executable:
 ```bash
-./target/idx-cli-1.0.0-SNAPSHOT-runner -s SYMBOL
+./target/idx-runner -s SYMBOL
 ```
 
 #### Building Native Image with Docker
@@ -74,7 +56,7 @@ The native executable will be available in the `target` directory.
 
 Basic command structure:
 ```bash
-java -jar idx-cli-1.0.0-SNAPSHOT.jar -s <stock-symbol> [options]
+./target/idx-runner -s <stock-symbol> [options]
 ```
 
 ### Command Options
@@ -91,17 +73,17 @@ java -jar idx-cli-1.0.0-SNAPSHOT.jar -s <stock-symbol> [options]
 
 1. Monitor BBCA stock with default settings:
 ```bash
-java -jar idx-cli-1.0.0-SNAPSHOT.jar -s BBCA
+./target/idx-runner -s BBCA
 ```
 
 2. Monitor BBCA stock with detailed information and 10-second refresh interval:
 ```bash
-java -jar idx-cli-1.0.0-SNAPSHOT.jar -s BBCA -d -i 10
+./target/idx-runner -s BBCA -d -i 1
 ```
 
 3. Monitor BBCA stock without colors:
 ```bash
-java -jar idx-cli-1.0.0-SNAPSHOT.jar -s BBCA -n
+./target/idx-runner -s BBCA -n
 ```
 
 ## Display Features
