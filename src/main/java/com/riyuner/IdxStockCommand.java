@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
@@ -32,15 +33,11 @@ public class IdxStockCommand implements Callable<Integer> {
     private static final String YELLOW = "\u001B[33m";
 
     // Add ANSI escape codes for cursor movement
-    private static final String CURSOR_UP = "\u001B[1A";     // Move cursor up 1 line
-    private static final String CURSOR_DOWN = "\u001B[1B";   // Move cursor down 1 line
     private static final String CLEAR_LINE = "\u001B[2K";    // Clear entire line
     private static final String CURSOR_HOME = "\u001B[H";    // Move cursor to top-left
-    private static final String SAVE_CURSOR = "\u001B[s";    // Save cursor position
-    private static final String RESTORE_CURSOR = "\u001B[u"; // Restore cursor position
 
-    private Random random;
-    private String stockColor; // Store single stock color
+    private final Random random;
+    private final String stockColor; // Store single stock color
 
     private static final String GOOGLE_FINANCE_URL = "https://www.google.com/finance/quote/";
     private static final int MAX_HISTORY_SIZE = 30; // For chart display
@@ -64,7 +61,6 @@ public class IdxStockCommand implements Callable<Integer> {
     boolean noColor;
 
     private boolean isFirstRun = true;
-    private int totalLines = 0; // Track number of lines printed
     private int terminalWidth = 80; // Default terminal width
 
     private boolean hasRealData = false; // Track first price chart data
@@ -180,36 +176,9 @@ public class IdxStockCommand implements Callable<Integer> {
         return chart.toString();
     }
 
-    private List<Double> priceHistory = new ArrayList<>();
-    private List<LocalDateTime> timeHistory = new ArrayList<>();
+    private final List<Double> priceHistory = new ArrayList<>();
+    private final List<LocalDateTime> timeHistory = new ArrayList<>();
     private double previousPrice = 0;
-
-    private void initializePlaceholderData() {
-        // Clear existing data
-        priceHistory.clear();
-        timeHistory.clear();
-        
-        // Add placeholder data points
-        LocalDateTime now = LocalDateTime.now();
-        double basePrice = 10000; // Sample base price
-        for (int i = 0; i < MAX_HISTORY_SIZE; i++) {
-            priceHistory.add(basePrice);
-            timeHistory.add(now.minusSeconds(interval * (MAX_HISTORY_SIZE - i)));
-        }
-    }
-
-    private String getPlaceholderDetailedInfo() {
-        StringBuilder details = new StringBuilder();
-        details.append(color(YELLOW, "\nDetailed Information:"))
-              .append("\n")
-              .append(String.format("%s%-20s:%s %s%n", BLUE, "Previous Close", RESET, "-- --"))
-              .append(String.format("%s%-20s:%s %s%n", BLUE, "Day Range", RESET, "-- --"))
-              .append(String.format("%s%-20s:%s %s%n", BLUE, "Year Range", RESET, "-- --"))
-              .append(String.format("%s%-20s:%s %s%n", BLUE, "Market Cap", RESET, "-- --"))
-              .append(String.format("%s%-20s:%s %s%n", BLUE, "Volume", RESET, "-- --"))
-              .append(String.format("%s%-20s:%s %s%n", BLUE, "P/E Ratio", RESET, "-- --"));
-        return details.toString();
-    }
 
     private String getMarketStateInfo() {
         LocalDateTime now = LocalDateTime.now();
@@ -226,8 +195,7 @@ public class IdxStockCommand implements Callable<Integer> {
 
         int hour = now.getHour();
         int minute = now.getMinute();
-        boolean isMarketOpen = (hour > MARKET_OPEN_HOUR || (hour == MARKET_OPEN_HOUR && minute >= 0)) &&
-                             (hour < MARKET_CLOSE_HOUR || (hour == MARKET_CLOSE_HOUR && minute <= MARKET_CLOSE_MINUTE));
+        boolean isMarketOpen = (hour > MARKET_OPEN_HOUR || hour == MARKET_OPEN_HOUR) && (hour < MARKET_CLOSE_HOUR || hour == MARKET_CLOSE_HOUR && minute <= MARKET_CLOSE_MINUTE);
 
         if (isMarketOpen) {
             return color(GREEN, "OPEN");
@@ -260,7 +228,7 @@ public class IdxStockCommand implements Callable<Integer> {
               .append(color(stockColor, separator)).append("\n");
     }
 
-    private void fetchAndDisplayData() throws IOException {
+    private void fetchAndDisplayData() {
         final StringBuilder display = new StringBuilder();
         
         if (isFirstRun) {
@@ -293,15 +261,13 @@ public class IdxStockCommand implements Callable<Integer> {
             double price = Double.parseDouble(priceElement.attr("data-last-price"));
             String change = "";
             if (!changeElements.isEmpty() && !percentElements.isEmpty()) {
-                change = changeElements.first().text() + " (" + percentElements.first().text() + ")";
+                change = Objects.requireNonNull(changeElements.first()).text() +
+                        " (" + Objects.requireNonNull(percentElements.first()).text() + ")";
             }
 
             // Add price and change to display buffer
             String priceColor = previousPrice == 0 ? RESET : (price >= previousPrice ? GREEN : RED);
-            display.append(CLEAR_LINE).append(color(priceColor, "Price: Rp " + NumberFormat.getInstance(new Locale("id", "ID")).format(price))).append("\n");
-            if (!change.isEmpty()) {
-                display.append(CLEAR_LINE).append(color(change.contains("+") ? GREEN : RED, "Change: " + change)).append("\n\n");
-            }
+            getCurrencyDisplay(display, price, change, priceColor);
             previousPrice = price;
 
             // Handle price chart data
@@ -313,18 +279,15 @@ public class IdxStockCommand implements Callable<Integer> {
                 display.setLength(0);
                 printHeader(display);
                 // Re-add price and change
-                display.append(CLEAR_LINE).append(color(priceColor, "Price: Rp " + NumberFormat.getInstance(new Locale("id", "ID")).format(price))).append("\n");
-                if (!change.isEmpty()) {
-                    display.append(CLEAR_LINE).append(color(change.contains("+") ? GREEN : RED, "Change: " + change)).append("\n\n");
-                }
+                getCurrencyDisplay(display, price, change, priceColor);
             }
 
             // Update price history
             priceHistory.add(price);
             timeHistory.add(LocalDateTime.now());
             if (priceHistory.size() > MAX_HISTORY_SIZE) {
-                priceHistory.remove(0);
-                timeHistory.remove(0);
+                priceHistory.removeFirst();
+                timeHistory.removeFirst();
             }
 
             // Handle detailed information if enabled
@@ -337,10 +300,7 @@ public class IdxStockCommand implements Callable<Integer> {
                         display.setLength(0);
                         printHeader(display);
                         // Re-add price and change
-                        display.append(CLEAR_LINE).append(color(priceColor, "Price: Rp " + NumberFormat.getInstance(new Locale("id", "ID")).format(price))).append("\n");
-                        if (!change.isEmpty()) {
-                            display.append(CLEAR_LINE).append(color(change.contains("+") ? GREEN : RED, "Change: " + change)).append("\n\n");
-                        }
+                        getCurrencyDisplay(display, price, change, priceColor);
                     }
                     display.append(color(YELLOW, "Detailed Information:\n"));
                     detailRows.forEach(row -> {
@@ -371,6 +331,15 @@ public class IdxStockCommand implements Callable<Integer> {
         }
     }
 
+    private void getCurrencyDisplay(StringBuilder display, double price, String change, String priceColor) {
+        display.append(CLEAR_LINE).append(color(priceColor, "Price: Rp " +
+                NumberFormat.getInstance(Locale.of("id", "ID")).format(price))).append("\n");
+        if (!change.isEmpty()) {
+            display.append(CLEAR_LINE).append(color(change.contains("+") ? GREEN :
+                    RED, "Change: " + change)).append("\n\n");
+        }
+    }
+
     @Override
     public Integer call() {
         try {
@@ -383,6 +352,7 @@ public class IdxStockCommand implements Callable<Integer> {
             System.out.println(color(YELLOW, "Starting live data feed... Press Ctrl+C to exit"));
             TimeUnit.SECONDS.sleep(1);
 
+            // Looping the main code
             while (true) {
                 try {
                     fetchAndDisplayData();
