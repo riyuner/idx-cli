@@ -127,8 +127,7 @@ The application is built using the following main dependencies:
 4. Run `mvn quarkus:dev` for development mode
 
 ## License
-
-This project is licensed under the [LICENSE NAME] - see the LICENSE file for details.
+See the LICENSE file for license rights and limitations (MIT).
 
 ## Acknowledgments
 
