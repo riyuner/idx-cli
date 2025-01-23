@@ -2,13 +2,16 @@ package com.riyuner;
 
 import java.io.IOException;
 import java.text.NumberFormat;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
@@ -47,6 +50,12 @@ public class IdxStockCommand implements Callable<Integer> {
     private static final int MARKET_OPEN_HOUR = 9;
     private static final int MARKET_CLOSE_HOUR = 15;
     private static final int MARKET_CLOSE_MINUTE = 30;
+
+    // Add holiday constants and cache
+    private static final String HOLIDAY_API_URL = "https://date.nager.at/api/v3/PublicHolidays/%d/ID";
+    private static final long HOLIDAY_CACHE_DURATION = TimeUnit.HOURS.toMillis(12);
+    private Set<LocalDate> holidayCache = new HashSet<>();
+    private long lastHolidayFetch = 0;
 
     @Option(names = {"-s", "--symbol"}, description = "Stock symbol (e.g., BBCA)", required = true)
     String symbol;
@@ -180,36 +189,111 @@ public class IdxStockCommand implements Callable<Integer> {
     private final List<LocalDateTime> timeHistory = new ArrayList<>();
     private double previousPrice = 0;
 
+    // Add new method to fetch and parse holidays
+    private void updateHolidayCache() {
+        long now = System.currentTimeMillis();
+        if (now - lastHolidayFetch < HOLIDAY_CACHE_DURATION && !holidayCache.isEmpty()) {
+            return; // Use cached data if it's fresh
+        }
+
+        try {
+            // Get holidays for current year and next year to handle year transitions. The next year is specifically
+            // to handle end of year actually, but i was to lazy for doing it the proper way
+            int currentYear = LocalDate.now().getYear();
+            fetchHolidaysForYear(currentYear);
+            fetchHolidaysForYear(currentYear + 1);
+            
+            lastHolidayFetch = now;
+        } catch (Exception e) {
+            System.err.println(color(RED, "Warning: Failed to fetch holiday data: " + e.getMessage()));
+        }
+    }
+
+    private void fetchHolidaysForYear(int year) {
+        try {
+            String url = String.format(HOLIDAY_API_URL, year);
+            Document doc = Jsoup.connect(url)
+                    .ignoreContentType(true) // Required for JSON response
+                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                    .get();
+
+            // Parse JSON response
+            String jsonResponse = doc.text();
+            // Split the JSON array by date field
+            String[] holidays = jsonResponse.split("\"date\":\"");
+            
+            for (int i = 1; i < holidays.length; i++) {
+                try {
+                    String dateStr = holidays[i].substring(0, 10); // Extract YYYY-MM-DD
+                    LocalDate holidayDate = LocalDate.parse(dateStr);
+                    holidayCache.add(holidayDate);
+                } catch (Exception e) {
+                    // Skip invalid dates
+                }
+            }
+        } catch (Exception e) {
+            System.err.println(color(RED, "Warning: Failed to fetch holidays for year " + year + ": " + e.getMessage()));
+        }
+    }
+
+    // Add method to check if date is a holiday
+    private boolean isHoliday(LocalDate date) {
+        updateHolidayCache();
+        return holidayCache.contains(date);
+    }
+
     private String getMarketStateInfo() {
         LocalDateTime now = LocalDateTime.now();
+        LocalDate today = now.toLocalDate();
+        
+        // Check for holiday first
+        if (isHoliday(today)) {
+            LocalDateTime nextWorkingDay = findNextWorkingDay(now);
+            long hoursUntilOpen = java.time.Duration.between(now, nextWorkingDay).toHours();
+            return color(RED, "CLOSED (Holiday) - Opens in " + hoursUntilOpen + " hours");
+        }
+
         boolean isWeekend = now.getDayOfWeek().getValue() >= 6; // Saturday or Sunday
         
         if (isWeekend) {
-            LocalDateTime nextMonday = now.plusDays(8 - now.getDayOfWeek().getValue())
-                                       .withHour(MARKET_OPEN_HOUR)
-                                       .withMinute(0)
-                                       .withSecond(0);
-            long hoursUntilOpen = java.time.Duration.between(now, nextMonday).toHours();
+            LocalDateTime nextWorkingDay = findNextWorkingDay(now);
+            long hoursUntilOpen = java.time.Duration.between(now, nextWorkingDay).toHours();
             return color(RED, "CLOSED (Weekend) - Opens in " + hoursUntilOpen + " hours");
         }
 
         int hour = now.getHour();
         int minute = now.getMinute();
-        boolean isMarketOpen = (hour > MARKET_OPEN_HOUR || hour == MARKET_OPEN_HOUR) && (hour < MARKET_CLOSE_HOUR || hour == MARKET_CLOSE_HOUR && minute <= MARKET_CLOSE_MINUTE);
+        boolean isMarketOpen = (hour > MARKET_OPEN_HOUR || hour == MARKET_OPEN_HOUR) && 
+                             (hour < MARKET_CLOSE_HOUR || hour == MARKET_CLOSE_HOUR && minute <= MARKET_CLOSE_MINUTE);
 
         if (isMarketOpen) {
             return color(GREEN, "OPEN");
         } else {
-            LocalDateTime nextOpen;
-            if (hour < MARKET_OPEN_HOUR) {
-                nextOpen = now.withHour(MARKET_OPEN_HOUR).withMinute(0).withSecond(0);
-            } else {
-                nextOpen = now.plusDays(1).withHour(MARKET_OPEN_HOUR).withMinute(0).withSecond(0);
-            }
+            LocalDateTime nextOpen = findNextWorkingDay(now);
             long hoursUntilOpen = java.time.Duration.between(now, nextOpen).toHours();
             long minutesUntilOpen = java.time.Duration.between(now, nextOpen).toMinutesPart();
-            return color(RED, "CLOSED - Opens in " + hoursUntilOpen + " hours" + minutesUntilOpen + " minutes");
+            return color(RED, "CLOSED - Opens in " + hoursUntilOpen + " hours " + minutesUntilOpen + " minutes");
         }
+    }
+
+    // Add helper method to find next working day
+    private LocalDateTime findNextWorkingDay(LocalDateTime from) {
+        LocalDateTime nextOpen = from;
+        
+        // If we're after market close, start checking from next day
+        if (from.getHour() >= MARKET_CLOSE_HOUR && from.getMinute() > MARKET_CLOSE_MINUTE) {
+            nextOpen = nextOpen.plusDays(1);
+        }
+        
+        // Set to market opening time
+        nextOpen = nextOpen.withHour(MARKET_OPEN_HOUR).withMinute(0).withSecond(0);
+        
+        // Keep checking until we find a working day
+        while (nextOpen.getDayOfWeek().getValue() >= 6 || isHoliday(nextOpen.toLocalDate())) {
+            nextOpen = nextOpen.plusDays(1);
+        }
+        
+        return nextOpen;
     }
 
     private void printHeader(StringBuilder buffer) {
