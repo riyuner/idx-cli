@@ -207,7 +207,8 @@ public class IdxStockCommand implements Callable<Integer> {
                 nextOpen = now.plusDays(1).withHour(MARKET_OPEN_HOUR).withMinute(0).withSecond(0);
             }
             long hoursUntilOpen = java.time.Duration.between(now, nextOpen).toHours();
-            return color(RED, "CLOSED - Opens in " + hoursUntilOpen + " hours");
+            long minutesUntilOpen = java.time.Duration.between(now, nextOpen).toMinutesPart();
+            return color(RED, "CLOSED - Opens in " + hoursUntilOpen + " hours" + minutesUntilOpen + " minutes");
         }
     }
 
